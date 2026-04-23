@@ -1,0 +1,14 @@
+[project]
+name = "kolmogorov-flow-matching"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=7.2.0",
+    "matplotlib>=3.10.8",
+    "nbconvert>=7.17.1",
+    "numpy>=2.4.4",
+    "pyyaml>=6.0.3",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+    "tqdm>=4.67.3",
+]
