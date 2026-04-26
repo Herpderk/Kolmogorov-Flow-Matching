@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from src.models.base import ConditionalBackbone
+from kolmogorov_flow_matching.models.base import ConditionalBackbone
 
 
 class ConvBlock(nn.Module):
@@ -167,14 +167,14 @@ class ConditionalUnetBackbone(ConditionalBackbone):
 
     def __init__(
         self,
-        data_shape: Sequence[int] = [1, 32, 32],
+        data_shape: Sequence[int] = [1, 160, 160],
         k_frames: int = 4,  # History condition window
         # Embedding dimension for the time variable
-        t_embed_dim: int = 128,
+        t_embed_dim: int = 640,
         # U-Net architecture
-        channels: Sequence[int] = [16, 32, 64, 128],
+        channels: Sequence[int] = [160, 320, 640],
         n_block_layers: int = 2,
-        activation_name: str = "ReLU",
+        activation_name: str = "SiLU",
         batchnorm: bool = False,
     ):
 

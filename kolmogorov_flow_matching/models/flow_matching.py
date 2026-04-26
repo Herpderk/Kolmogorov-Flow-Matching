@@ -2,7 +2,10 @@ import torch
 import torch.nn.functional as F
 from torchdiffeq import odeint
 
-from src.models.base import ConditionalBackbone, ConditionalGenerativeFramework
+from kolmogorov_flow_matching.models.base import (
+    ConditionalBackbone,
+    ConditionalGenerativeFramework,
+)
 
 
 class ConditionalFlowMatching(ConditionalGenerativeFramework):

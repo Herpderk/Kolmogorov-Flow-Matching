@@ -1,7 +1,10 @@
 import torch
 import torch.nn.functional as F
 
-from src.models.base import ConditionalBackbone, ConditionalGenerativeFramework
+from kolmogorov_flow_matching.models.base import (
+    ConditionalBackbone,
+    ConditionalGenerativeFramework,
+)
 
 
 class ConditionalDiffusion(ConditionalGenerativeFramework):
