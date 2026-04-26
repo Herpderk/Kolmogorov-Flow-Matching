@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from src.models.backbone import ConditionalBackbone
+from src.models.base import ConditionalBackbone
 
 
 class ConvBlock(nn.Module):
