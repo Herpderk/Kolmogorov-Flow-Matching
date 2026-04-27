@@ -122,4 +122,3 @@ def save_checkpoint(
         save_path,
     )
     print(f"Checkpoint saved to {save_path}")
-    print("-" * 50)
