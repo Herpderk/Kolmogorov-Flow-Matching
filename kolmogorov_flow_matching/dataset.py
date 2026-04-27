@@ -3,6 +3,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from kolmogorov_flow_matching.utils import denormalize, normalize
+
 
 def compute_hdf5_stats(
     h5_file_path: str, dataset_key: str = "u", chunk_size: int = 100
@@ -32,7 +34,7 @@ def compute_hdf5_stats(
     return float(mean), float(std)
 
 
-class NormalizedKolmogorovDataset(Dataset):
+class ConditionalDataset(Dataset):
     def __init__(
         self,
         h5_file_path: str,
@@ -81,20 +83,12 @@ class NormalizedKolmogorovDataset(Dataset):
         history = self.data_handle[traj_idx, t_start:t_target]
         target = self.data_handle[traj_idx, t_target]
 
-        # Convert to PyTorch tensors
         x_cond = torch.from_numpy(history).float()
         x_target = torch.from_numpy(target).float().unsqueeze(0)
-
-        # 3. APPLY NORMALIZATION
-        # (x - mean) / std ensures the network sees nicely scaled inputs
-        x_cond = (x_cond - self.mean) / self.std
-        x_target = (x_target - self.mean) / self.std
-
         return {"condition": x_cond, "target": x_target}
 
-    def denormalize(self, tensor: torch.Tensor) -> torch.Tensor:
-        """
-        Call this on your model's outputs during inference to convert
-        them back to standard physical Kolmogorov flow values.
-        """
-        return (tensor * self.std) + self.mean
+    def normalize(self, x: torch.Tensor) -> torch.Tensor:
+        return normalize(x, self.mean, self.std)
+
+    def denormalize(self, x: torch.Tensor) -> torch.Tensor:
+        return denormalize(x, self.mean, self.std)

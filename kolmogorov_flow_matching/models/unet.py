@@ -169,10 +169,8 @@ class ConditionalUnetBackbone(ConditionalBackbone):
         self,
         data_shape: Sequence[int] = [1, 160, 160],
         k_frames: int = 4,  # History condition window
-        # Embedding dimension for the time variable
-        t_embed_dim: int = 640,
-        # U-Net architecture
-        channels: Sequence[int] = [160, 320, 640],
+        t_embed_dim: int = 128,  # Embedding dimension for the time variable
+        channels: Sequence[int] = [32, 64, 128, 256],
         n_block_layers: int = 2,
         activation_name: str = "SiLU",
         batchnorm: bool = False,

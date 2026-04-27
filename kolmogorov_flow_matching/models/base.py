@@ -4,6 +4,8 @@ from typing import Sequence
 import torch
 from torch import nn
 
+from kolmogorov_flow_matching.utils import denormalize, normalize
+
 
 class ConditionalBackbone(nn.Module, ABC):
     """
@@ -49,16 +51,36 @@ class ConditionalGenerativeFramework(nn.Module, ABC):
         self.backbone = backbone
 
         # Register normalization stats as non-trainable persistent buffers
-        self.register_buffer("data_mean", torch.tensor(mean, dtype=torch.float32))
-        self.register_buffer("data_std", torch.tensor(std, dtype=torch.float32))
+        self.register_buffer("mean", torch.tensor(mean, dtype=torch.float32))
+        self.register_buffer("std", torch.tensor(std, dtype=torch.float32))
 
     def normalize(self, x: torch.Tensor) -> torch.Tensor:
-        """Scales physical fluid data to N(0, 1) latent space."""
-        return (x - self.data_mean) / self.data_std
+        return normalize(x, self.mean, self.std)
 
     def denormalize(self, x: torch.Tensor) -> torch.Tensor:
-        """Unscales N(0, 1) latent data back to physical fluid metrics."""
-        return (x * self.data_std) + self.data_mean
+        return denormalize(x, self.mean, self.std)
+
+    def autoregressive_generation(
+        self, init_conds: torch.Tensor, num_steps: int
+    ) -> torch.Tensor:
+        """
+        init_conds: shape [1, k_frames, H, W]
+        """
+        self.eval()
+        history = init_conds.clone()
+        predictions = []
+
+        with torch.no_grad():
+            for step in range(num_steps):
+                # 1. Generate the next frame based on the current history window
+                next_frame = self.sample(history)  # Shape: [1, 1, H, W]
+                predictions.append(next_frame)
+
+                # 2. Slide the window: Drop the oldest frame, append the new prediction
+                # history[:, 1:] takes frames 1, 2, 3 (dropping 0)
+                history = torch.cat([history[:, 1:], next_frame], dim=1)
+
+        return torch.cat(predictions, dim=1)  # Shape: [1, num_steps, H, W]
 
     @abstractmethod
     def get_training_loss(

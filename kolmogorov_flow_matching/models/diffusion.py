@@ -16,10 +16,12 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
         T: int = 1000,
         b_0: float = 1e-4,
         b_T: float = 2e-2,
+        normalize_inputs: bool = True,
     ):
         # Passes the backbone and stats to ConditionalGenerativeFramework
         super().__init__(backbone, mean, std)
 
+        self.normalize_flag = normalize_inputs
         self.T = T
         beta = torch.linspace(b_0**0.5, b_T**0.5, T) ** 2
         alpha = 1.0 - beta
@@ -35,6 +37,9 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
     def get_training_loss(
         self, x_target: torch.Tensor, x_cond: torch.Tensor
     ) -> torch.Tensor:
+        x_target = self.normalize(x_target) if self.normalize_flag else x_target
+        x_cond = self.normalize(x_cond) if self.normalize_flag else x_cond
+
         B = x_target.size(0)
         device = x_target.device
 
@@ -52,9 +57,11 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
     def sample(
         self,
         x_cond: torch.Tensor,
-        return_trajectory: bool = False,
         return_physical: bool = True,
+        return_trajectory: bool = False,
     ) -> torch.Tensor:
+        x_cond = self.normalize(x_cond) if self.normalize_flag else x_cond
+
         B = x_cond.size(0)
         device = x_cond.device
         x = torch.randn((B, *self.backbone.data_shape), device=device)
@@ -87,8 +94,7 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
 
         output = torch.stack(trajectory) if return_trajectory else x
 
-        # Uses the parent class's denormalize method!
-        if return_physical:
+        if return_physical and self.normalize_flag:
             output = self.denormalize(output)
 
         return output

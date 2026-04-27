@@ -2,6 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from kolmogorov_flow_matching.models.base import ConditionalGenerativeFramework
+
 
 def visualize_frames(x: torch.Tensor | np.ndarray):
     """
@@ -52,3 +54,28 @@ def visualize_frames(x: torch.Tensor | np.ndarray):
 
     plt.suptitle(f"Kolmogorov Flow ({num_frames} frames)", y=1.05, fontsize=14)
     plt.show()
+
+
+def autoregressive_generation(
+    model: ConditionalGenerativeFramework,
+    initial_conditions: torch.Tensor,
+    num_steps: int,
+) -> torch.Tensor:
+    """
+    initial_conditions: shape [1, k_frames, H, W]
+    """
+    model.eval()
+    current_history = initial_conditions.clone()
+    predictions = []
+
+    with torch.no_grad():
+        for step in range(num_steps):
+            # 1. Generate the next frame based on the current history window
+            next_frame = model.sample(current_history)  # Shape: [1, 1, H, W]
+            predictions.append(next_frame)
+
+            # 2. Slide the window: Drop the oldest frame, append the new prediction
+            # current_history[:, 1:] takes frames 1, 2, 3 (dropping 0)
+            current_history = torch.cat([current_history[:, 1:], next_frame], dim=1)
+
+    return torch.cat(predictions, dim=1)  # Shape: [1, num_steps, H, W]

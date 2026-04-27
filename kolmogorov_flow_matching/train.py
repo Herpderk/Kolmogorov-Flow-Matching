@@ -5,26 +5,28 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from kolmogorov_flow_matching.dataset import NormalizedKolmogorovDataset
+from kolmogorov_flow_matching.dataset import ConditionalDataset
 from kolmogorov_flow_matching.eval import visualize_frames
 from kolmogorov_flow_matching.models.base import ConditionalGenerativeFramework
 
 
 def train_conditional_generative_model(
     model: ConditionalGenerativeFramework,
-    dataset: NormalizedKolmogorovDataset,
+    dataset: ConditionalDataset,
     optimizer: Optimizer,
     num_epochs: int,
     batch_size: int,
     max_grad_norm: float = 1.0,
-    num_dataloader_workers: int = 4,
+    num_workers: int = 4,
+    persistent_workers: bool = True,
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ) -> float:
     train_loader = DataLoader(
         dataset,
         batch_size=batch_size,
+        num_workers=num_workers,
+        persistent_workers=persistent_workers,
         shuffle=True,
-        num_workers=num_dataloader_workers,
         pin_memory=True,
     )
 
@@ -63,24 +65,12 @@ def train_conditional_generative_model(
 
         avg_loss = epoch_loss / len(train_loader)
 
-        # 1. Store the metrics
+        # Store the metrics
         epoch_history.append(epoch + 1)
         loss_history.append(avg_loss)
 
-        # 2. Clear the cell output (wait=True prevents flickering)
+        # Clear the cell output (wait=True prevents flickering)
         clear_output(wait=True)
-
-        # 3. Draw the updated plot
-        plt.figure(figsize=(10, 5))
-        plt.plot(epoch_history, loss_history, marker="o", linestyle="-", color="b")
-        plt.grid(linestyle="dashed")
-        plt.title("Training Loss vs. Epoch")
-        plt.xlabel("Epoch")
-        plt.ylabel("Average Loss")
-        plt.show()
-
-        # This will now print cleanly on a new line
-        print(f"Epoch {epoch + 1} completed. Average Loss: {avg_loss:.5f}")
 
         # Evaluate model after each epoch
         model.eval()
@@ -96,10 +86,21 @@ def train_conditional_generative_model(
             x_gen_eval = model.sample(x_cond_eval)
         target_frame = x_target_eval.detach().cpu().squeeze()
         gen_frame = x_gen_eval.detach().cpu().squeeze()
-        comparison_tensor = torch.stack([target_frame, gen_frame], dim=0)
-        print(f"Visualizing Random Sample #{rand_idx}")
-        print(f"Target (Frame 1) vs. Generated Prediction (Frame 2):")
+        diff_frame = gen_frame - target_frame
+        comparison_tensor = torch.stack([target_frame, gen_frame, diff_frame], dim=0)
+        print(f"Target (Frame 1), Generated (Frame 2), Difference (Frame 3):")
         visualize_frames(comparison_tensor)
+
+        # Draw the updated loss plot
+        plt.figure(figsize=(10, 5))
+        plt.plot(epoch_history, loss_history, marker="o", linestyle="-", color="b")
+        plt.grid(linestyle="dashed")
+        plt.title("Training Loss vs. Epoch")
+        plt.xlabel("Epoch")
+        plt.ylabel("Average Loss")
+        plt.show()
+
+        print(f"Epoch {epoch + 1} completed. Average Loss: {avg_loss:.5f}")
 
     return avg_loss
 
