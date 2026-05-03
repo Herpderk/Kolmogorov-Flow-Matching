@@ -1,4 +1,4 @@
-from kolmogorov_flow_matching.dataset import ConditionalDataset
+from kolmogorov_flow_matching.dataset import TimeseriesDataset
 from kolmogorov_flow_matching.eval import visualize_frames
 from kolmogorov_flow_matching.models.diffusion import ConditionalDiffusion
 from kolmogorov_flow_matching.models.flow_matching import ConditionalFlowMatching

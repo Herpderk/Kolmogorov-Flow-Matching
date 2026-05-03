@@ -19,9 +19,8 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
         normalize_inputs: bool = True,
     ):
         # Passes the backbone and stats to ConditionalGenerativeFramework
-        super().__init__(backbone, mean, std)
+        super().__init__(backbone, mean, std, normalize_inputs)
 
-        self.normalize_flag = normalize_inputs
         self.T = T
         beta = torch.linspace(b_0**0.5, b_T**0.5, T) ** 2
         alpha = 1.0 - beta
@@ -57,7 +56,8 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
     def sample(
         self,
         x_cond: torch.Tensor,
-        return_physical: bool = True,
+        num_inference_steps: int = 50,
+        eta: float = 0.0,
         return_trajectory: bool = False,
     ) -> torch.Tensor:
         x_cond = self.normalize(x_cond) if self.normalize_flag else x_cond
@@ -67,34 +67,59 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
         x = torch.randn((B, *self.backbone.data_shape), device=device)
         trajectory = [x] if return_trajectory else None
 
-        self.backbone.eval()
+        # 1. Create the sub-sampled DDIM time steps
+        step_ratio = self.T // num_inference_steps
+        # e.g., for T=1000, steps=50: [980, 960, ..., 20, 0]
+        timesteps = (
+            torch.flip(
+                (torch.arange(0, num_inference_steps) * step_ratio).round(), dims=[0]
+            )
+            .to(device)
+            .long()
+        )
+        # The previous timestep to jump to (appending -1 to represent the final pure x_0 state)
+        timesteps_prev = torch.cat([timesteps[1:], torch.tensor([-1], device=device)])
 
-        for t_step in reversed(range(self.T)):
-            t_tensor = torch.full((B,), t_step, device=device, dtype=torch.float32)
+        # 2. Iterate over the shortened sequence
+        for t_step, t_prev in zip(timesteps, timesteps_prev):
+            # Create a batch-sized tensor for the neural net
+            t_tensor = torch.full(
+                (B,), t_step.item(), device=device, dtype=torch.float32
+            )
             predicted_noise = self.backbone(t_tensor, x, x_cond)
 
-            beta_t = self.beta[t_step]
-            sqrt_one_minus_alpha_bar_t = self.sqrt_one_minus_alpha_bar[t_step]
-            sqrt_recip_alpha_t = self.sqrt_recip_alpha[t_step]
-
-            model_mean = sqrt_recip_alpha_t * (
-                x - beta_t / sqrt_one_minus_alpha_bar_t * predicted_noise
+            # Grab the alpha_bar (cumulative product) for current and previous step
+            alpha_bar_t = self.alpha_bar[t_step]
+            # If we are at the final step (t_prev == -1), alpha_bar is defined as 1.0
+            alpha_bar_prev = (
+                self.alpha_bar[t_prev]
+                if t_prev >= 0
+                else torch.tensor(1.0, device=device)
             )
 
-            if t_step > 0:
-                noise = torch.randn_like(x)
-                x = model_mean + torch.sqrt(beta_t) * noise
-            else:
-                x = model_mean
+            # 3. Implement the DDIM Equation
+            # Step A: Predict the clean image (x_0)
+            pred_x0 = (
+                x - torch.sqrt(1.0 - alpha_bar_t) * predicted_noise
+            ) / torch.sqrt(alpha_bar_t)
+
+            # Step B: Calculate standard deviation of noise (sigma_t)
+            # When eta=0 (default DDIM), sigma_t is 0, making the generation deterministic
+            sigma_t = eta * torch.sqrt(
+                (1.0 - alpha_bar_prev)
+                / (1.0 - alpha_bar_t)
+                * (1.0 - alpha_bar_t / alpha_bar_prev)
+            )
+
+            # Step C: Calculate the direction pointing to x_t
+            dir_xt = torch.sqrt(1.0 - alpha_bar_prev - sigma_t**2) * predicted_noise
+
+            # Step D: Jump to the previous timestep
+            noise = torch.randn_like(x) if t_prev >= 0 else 0.0
+            x = torch.sqrt(alpha_bar_prev) * pred_x0 + dir_xt + sigma_t * noise
 
             if return_trajectory:
                 trajectory.append(x)
 
-        self.backbone.train()
-
         output = torch.stack(trajectory) if return_trajectory else x
-
-        if return_physical and self.normalize_flag:
-            output = self.denormalize(output)
-
-        return output
+        return self.denormalize(output) if self.normalize_flag else output

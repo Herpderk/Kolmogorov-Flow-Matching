@@ -3,8 +3,6 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from kolmogorov_flow_matching.utils import denormalize, normalize
-
 
 def compute_hdf5_stats(
     h5_file_path: str, dataset_key: str = "u", chunk_size: int = 100
@@ -34,17 +32,19 @@ def compute_hdf5_stats(
     return float(mean), float(std)
 
 
-class ConditionalDataset(Dataset):
+class TimeseriesDataset(Dataset):
     def __init__(
         self,
         h5_file_path: str,
         k_frames: int = 4,
+        target_steps: int = 1,  # NEW: How many future frames to return
         dataset_key: str = "u",
         mean: float = None,
         std: float = None,
     ):
         super().__init__()
         self.k_frames = k_frames
+        self.target_steps = target_steps  # NEW
         self.h5_file_path = h5_file_path
         self.dataset_key = dataset_key
 
@@ -64,7 +64,8 @@ class ConditionalDataset(Dataset):
         self.num_trajectories = self.shape[0]
         self.time_steps = self.shape[1]
 
-        self.samples_per_traj = self.time_steps - self.k_frames
+        # NEW: Adjust the math so we don't accidentally slice past the end of the video
+        self.samples_per_traj = self.time_steps - self.k_frames - self.target_steps + 1
         self.total_samples = self.num_trajectories * self.samples_per_traj
 
         self.data_handle = None
@@ -78,17 +79,18 @@ class ConditionalDataset(Dataset):
 
         traj_idx = idx // self.samples_per_traj
         t_start = idx % self.samples_per_traj
-        t_target = t_start + self.k_frames
 
-        history = self.data_handle[traj_idx, t_start:t_target]
-        target = self.data_handle[traj_idx, t_target]
+        t_target_start = t_start + self.k_frames
+        t_target_end = t_target_start + self.target_steps
 
+        # Slice the continuous HDF5 array
+        history = self.data_handle[traj_idx, t_start:t_target_start]
+        target = self.data_handle[traj_idx, t_target_start:t_target_end]
+
+        # history is [4, H, W]. This naturally acts as 4 channels when batched.
         x_cond = torch.from_numpy(history).float()
-        x_target = torch.from_numpy(target).float().unsqueeze(0)
+
+        # THE FIX: Unsqueeze dim 1 to force the shape to [Target_Steps, 1, H, W]
+        x_target = torch.from_numpy(target).float().unsqueeze(1)
+
         return {"condition": x_cond, "target": x_target}
-
-    def normalize(self, x: torch.Tensor) -> torch.Tensor:
-        return normalize(x, self.mean, self.std)
-
-    def denormalize(self, x: torch.Tensor) -> torch.Tensor:
-        return denormalize(x, self.mean, self.std)

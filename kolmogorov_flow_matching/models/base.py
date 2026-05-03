@@ -46,9 +46,16 @@ class ConditionalGenerativeFramework(nn.Module, ABC):
     persistent physical data normalization statistics.
     """
 
-    def __init__(self, backbone: nn.Module, mean: float = 0.0, std: float = 1.0):
+    def __init__(
+        self,
+        backbone: nn.Module,
+        mean: float = 0.0,
+        std: float = 1.0,
+        normalize_inputs: bool = True,
+    ):
         super().__init__()
         self.backbone = backbone
+        self.normalize_flag = normalize_inputs
 
         # Register normalization stats as non-trainable persistent buffers
         self.register_buffer("mean", torch.tensor(mean, dtype=torch.float32))
