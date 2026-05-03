@@ -37,7 +37,16 @@ class ConditionalFlowMatching(ConditionalGenerativeFramework):
         z_s = (1.0 - s_view) * z_0 + s_view * x_target
         target_velocity = x_target - z_0
 
-        predicted_velocity = self.backbone(s, z_s, x_cond)
+        # Inject small noise into the condition so the model learns to correct drifting states
+        if self.training:
+            noise_scale = 0.02  # Tune between 0.01 and 0.05
+            x_cond_input = x_cond + torch.randn_like(x_cond) * noise_scale
+        else:
+            x_cond_input = x_cond
+
+        # Use the noisy condition, but keep the pristine z_s and s
+        predicted_velocity = self.backbone(s, z_s, x_cond_input)
+
         return F.mse_loss(predicted_velocity, target_velocity)
 
     @torch.inference_mode()
@@ -48,6 +57,7 @@ class ConditionalFlowMatching(ConditionalGenerativeFramework):
         integration_steps: int = 10,
         return_trajectory: bool = False,
     ) -> torch.Tensor:
+        x_cond = self.normalize(x_cond) if self.normalize_flag else x_cond
 
         B = x_cond.size(0)
         device = x_cond.device

@@ -27,8 +27,8 @@ def train_conditional_generative_model(
     batch_size: int,
     max_grad_norm: float,
     num_val_batches: int = 4,
-    log_interval: int = 200,
-    val_interval: int = 2000,
+    log_interval: int = 400,
+    val_interval: int = 4000,
     num_workers: int = 4,
     persistent_workers: bool = True,
     use_wandb: bool = True,
@@ -87,7 +87,8 @@ def train_conditional_generative_model(
                                 "train/epoch": epoch + (batch_idx / len(train_loader)),
                                 "train/samples": samples_seen,  # Log as a separate metric
                                 "global_step": global_step,
-                            }
+                            },
+                            step=global_step,
                         )
 
                 # --- VALIDATE ---
@@ -170,14 +171,15 @@ def validate(model, valid_loader, device, global_step, use_wandb, max_batches=No
     if use_wandb and wandb.run is not None:
         wandb.log(
             {
-                "val/loss_one_step": avg_v,
-                "val/loss_ar_rollout": avg_ar,
+                "val/MSE_one_step": avg_v,
+                "val/MSE_ar_rollout": avg_ar,
                 "val/comparison_strip": wandb.Image(
                     comparison_strip,
                     caption=f"Step {global_step} | Target | Gen | Residual(Biased)",
                 ),
                 "global_step": global_step,
-            }
+            },
+            step=global_step,
         )
     else:
         # Local summary output
@@ -197,14 +199,12 @@ def save_checkpoint(
     save_path: str,
     model: ConditionalGenerativeFramework,
     optimizer: Optimizer,
-    final_epoch_loss: float,
     num_epochs: int,
 ) -> None:
     torch.save(
         {
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
-            "loss": final_epoch_loss,
             "epoch": num_epochs,
         },
         save_path,

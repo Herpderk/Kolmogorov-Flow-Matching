@@ -10,10 +10,10 @@ def download_train_set(local_save_dir: str) -> str:
     )
 
 
-def download_eval_set(local_save_dir: str) -> str:
+def download_valid_set(local_save_dir: str) -> str:
     return hf_hub_download(
         repo_id="ayz2/temporal_pdes",
         filename="valid/KolmFlow_valid_256.h5",  # "kolmogorov/test.h5",
         repo_type="dataset",
-        local_save_dir=local_save_dir,
+        local_dir=local_save_dir,
     )

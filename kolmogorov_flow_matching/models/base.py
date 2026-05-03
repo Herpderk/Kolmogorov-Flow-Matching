@@ -68,10 +68,12 @@ class ConditionalGenerativeFramework(nn.Module, ABC):
         return denormalize(x, self.mean, self.std)
 
     def autoregressive_generation(
-        self, init_conds: torch.Tensor, num_steps: int
+        self, init_conds: torch.Tensor, num_steps: int, **kwargs
     ) -> torch.Tensor:
         """
-        init_conds: shape [1, k_frames, H, W]
+        init_conds: shape [B, k_frames, C, H, W]
+        num_steps: The number of future frames to generate autoregressively.
+        kwargs: Arguments passed directly to the underlying .sample() method.
         """
         self.eval()
         history = init_conds.clone()
@@ -79,15 +81,18 @@ class ConditionalGenerativeFramework(nn.Module, ABC):
 
         with torch.no_grad():
             for step in range(num_steps):
-                # 1. Generate the next frame based on the current history window
-                next_frame = self.sample(history)  # Shape: [1, 1, H, W]
+                # 1. Generate the next frame, passing down solver configs (NFE, method, etc.)
+                next_frame = self.sample(history, **kwargs)
                 predictions.append(next_frame)
 
-                # 2. Slide the window: Drop the oldest frame, append the new prediction
-                # history[:, 1:] takes frames 1, 2, 3 (dropping 0)
+                # 2. Slide the window
                 history = torch.cat([history[:, 1:], next_frame], dim=1)
 
-        return torch.cat(predictions, dim=1)  # Shape: [1, num_steps, H, W]
+        return (
+            torch.stack(predictions, dim=1)
+            if predictions[0].ndim == 4
+            else torch.cat(predictions, dim=1)
+        )
 
     @abstractmethod
     def get_training_loss(

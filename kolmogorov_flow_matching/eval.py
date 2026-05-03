@@ -4,11 +4,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
+from IPython.display import clear_output, display
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from kolmogorov_flow_matching.dataset import TimeseriesDataset
-from kolmogorov_flow_matching.models.base import ConditionalGenerativeFramework
+from kolmogorov_flow_matching.models.diffusion import ConditionalDiffusion
+from kolmogorov_flow_matching.models.flow_matching import ConditionalFlowMatching
 
 
 def visualize_frames(x: torch.Tensor | np.ndarray):
@@ -62,202 +64,132 @@ def visualize_frames(x: torch.Tensor | np.ndarray):
     plt.show()
 
 
-def autoregressive_generation(
-    model: ConditionalGenerativeFramework,
-    initial_conditions: torch.Tensor,
-    num_steps: int,
-) -> torch.Tensor:
+def evaluate_ar_rollout(model, x_cond, x_target, nfe_steps, solver_method):
     """
-    initial_conditions: shape [1, k_frames, H, W]
+    Helper function to run autoregressive generation using the class method.
     """
-    model.eval()
-    current_history = initial_conditions.clone()
-    predictions = []
+    # The number of frames we need to generate to match the target
+    ar_frames_to_predict = x_target.size(1)
 
-    with torch.no_grad():
-        for step in range(num_steps):
-            # 1. Generate the next frame based on the current history window
-            next_frame = model.sample(current_history)  # Shape: [1, 1, H, W]
-            predictions.append(next_frame)
+    # Call the inherited AR method, routing the correct kwargs for the solver
+    if solver_method == "ddim":
+        gen_frames = model.autoregressive_generation(
+            init_conds=x_cond,
+            num_steps=ar_frames_to_predict,
+            num_inference_steps=nfe_steps,  # Kwarg for Diffusion
+        )
+    else:
+        gen_frames = model.autoregressive_generation(
+            init_conds=x_cond,
+            num_steps=ar_frames_to_predict,
+            method=solver_method,  # Kwarg for Flow Matching
+            integration_steps=nfe_steps,  # Kwarg for Flow Matching
+        )
 
-            # 2. Slide the window: Drop the oldest frame, append the new prediction
-            # current_history[:, 1:] takes frames 1, 2, 3 (dropping 0)
-            current_history = torch.cat([current_history[:, 1:], next_frame], dim=1)
-
-    return torch.cat(predictions, dim=1)  # Shape: [1, num_steps, H, W]
+    # Calculate MSE across the entire generated trajectory
+    mse = F.mse_loss(gen_frames, x_target).item()
+    return mse
 
 
 def benchmark_integration_methods(
-    model, x_cond, x_target, num_steps: int, solver_method: str
+    valid_set,
+    diff_model,
+    fm_model,
+    batch_size=16,
+    device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
 ):
-    """
-    Runs a multi-step autoregressive rollout and records the time and MSE.
-    """
-    target_steps = x_target.size(1)
-    current_cond = x_cond.clone()
-    gen_frames = []
-
-    # Synchronize CUDA to get accurate timing
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    start_time = time.perf_counter()
-
-    for t in range(target_steps):
-        # Generate the next frame
-        next_frame = model.sample(
-            current_cond, num_inference_steps=num_steps, solver=solver_method
-        )
-        gen_frames.append(next_frame)
-
-        # Slide the conditioning window forward
-        current_cond = torch.cat([current_cond[:, 1:], next_frame.unsqueeze(1)], dim=1)
-
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-    end_time = time.perf_counter()
-
-    gen_sequence = torch.stack(gen_frames, dim=1)
-    mse = F.mse_loss(gen_sequence, x_target).item()
-    duration = end_time - start_time
-
-    return mse, duration
-
-
-def run_benchmark():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running benchmark on {device}...")
 
-    # 1. Load the Validation Dataset
-    valid_set = TimeseriesDataset(
-        h5_file_path="path/to/valid.h5",  # UPDATE THIS
-        k_frames=4,
-        target_steps=10,  # 10-step AR rollout
-        dataset_key="train/u",  # Match your previous key
-    )
-    valid_loader = DataLoader(valid_set, batch_size=8, shuffle=False)
-
+    valid_loader = DataLoader(valid_set, batch_size=batch_size, shuffle=False)
     batch = next(iter(valid_loader))
     x_cond = batch["condition"].to(device)
     x_target = batch["target"].to(device)
 
-    # 2. Load the Models
-    print("Loading models...")
-    # diffusion_model = DiffusionModel(...).to(device)
-    # diffusion_model.load_state_dict(torch.load("diffusion_checkpoint.pt"))
-    # diffusion_model.eval()
+    # Infer the number of AR steps from the target sequence dimension
+    ar_steps = x_target.size(1)
 
-    # fm_model = FlowMatchingModel(...).to(device)
-    # fm_model.load_state_dict(torch.load("fm_checkpoint.pt"))
-    # fm_model.eval()
-
-    # 3. Define the NFE targets (Multiples of 4 work best to keep RK2 and RK4 exact)
-    target_nfes = [12, 24, 36, 48, 60, 100]
+    # Define the NFE targets
+    target_nfes = torch.arange(0, 40, 4).long().tolist()[1:]
 
     results = {
-        "DDIM": {"nfe": [], "mse": [], "time": []},
-        "Euler": {"nfe": [], "mse": [], "time": []},
-        "RK2": {"nfe": [], "mse": [], "time": []},
-        "RK4": {"nfe": [], "mse": [], "time": []},
+        "DDIM": {"nfe": [], "mse": []},
+        "Euler": {"nfe": [], "mse": []},
+        "RK4": {"nfe": [], "mse": []},
     }
-
-    print("Starting evaluations...")
-    with torch.no_grad():
-        for nfe in tqdm(target_nfes, desc="Evaluating NFEs"):
-            # --- Diffusion (DDIM) ---
-            # DDIM steps = NFE
-            # mse_ddim, time_ddim = evaluate_ar_rollout(
-            #     diffusion_model, x_cond, x_target, num_steps=nfe, solver_method="ddim"
-            # )
-            # results["DDIM"]["nfe"].append(nfe)
-            # results["DDIM"]["mse"].append(mse_ddim)
-            # results["DDIM"]["time"].append(time_ddim)
-
-            # --- Flow Matching (Euler) ---
-            # Euler steps = NFE
-            # mse_euler, time_euler = evaluate_ar_rollout(
-            #     fm_model, x_cond, x_target, num_steps=nfe, solver_method="euler"
-            # )
-            # results["Euler"]["nfe"].append(nfe)
-            # results["Euler"]["mse"].append(mse_euler)
-            # results["Euler"]["time"].append(time_euler)
-
-            # --- Flow Matching (RK2) ---
-            # RK2 steps = NFE / 2
-            rk2_steps = max(1, nfe // 2)
-            actual_rk2_nfe = rk2_steps * 2
-
-            # mse_rk2, time_rk2 = evaluate_ar_rollout(
-            #     fm_model, x_cond, x_target, num_steps=rk2_steps, solver_method="rk2"
-            # )
-            # results["RK2"]["nfe"].append(actual_rk2_nfe)
-            # results["RK2"]["mse"].append(mse_rk2)
-            # results["RK2"]["time"].append(time_rk2)
-
-            # --- Flow Matching (RK4) ---
-            # RK4 steps = NFE / 4
-            rk4_steps = max(1, nfe // 4)
-            actual_rk4_nfe = rk4_steps * 4
-
-            # mse_rk4, time_rk4 = evaluate_ar_rollout(
-            #     fm_model, x_cond, x_target, num_steps=rk4_steps, solver_method="rk4"
-            # )
-            # results["RK4"]["nfe"].append(actual_rk4_nfe)
-            # results["RK4"]["mse"].append(mse_rk4)
-            # results["RK4"]["time"].append(time_rk4)
-
-    # 4. Plotting the Results
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
 
     # Colors and markers for consistency
     styles = {
         "DDIM": {"color": "blue", "marker": "o"},
         "Euler": {"color": "red", "marker": "s"},
-        "RK2": {"color": "orange", "marker": "v"},
         "RK4": {"color": "green", "marker": "^"},
     }
 
-    # Plot 1: NFE vs MSE
-    for method, data in results.items():
-        if len(data["nfe"]) > 0:
-            ax1.plot(
-                data["nfe"],
-                data["mse"],
-                label=method,
-                **styles[method],
-                linestyle="-",
-                linewidth=2,
+    # Set up the figure once outside the loop (adjusted width for a single plot)
+    fig, ax = plt.subplots(figsize=(10, 6.5))
+
+    print(f"Starting evaluations for {ar_steps}-step autoregressive rollouts...")
+    with torch.no_grad():
+        for nfe_raw in tqdm(target_nfes, desc="Evaluating NFEs"):
+            # Cast the requested NFE to an integer so we plot exactly what the solver uses
+            nfe_int = int(nfe_raw)
+            if nfe_int == 0:
+                continue  # Skip 0 to avoid log scale errors
+
+            # --- Diffusion (DDIM) ---
+            mse_ddim = evaluate_ar_rollout(
+                diff_model, x_cond, x_target, nfe_steps=nfe_int, solver_method="ddim"
             )
+            # Store the integer nfe_int, not nfe_raw
+            results["DDIM"]["nfe"].append(nfe_int)
+            results["DDIM"]["mse"].append(mse_ddim)
 
-    ax1.set_title("10-Step AR Prediction Error vs Compute")
-    ax1.set_xlabel("Number of Function Evaluations (NFE)")
-    ax1.set_ylabel("Autoregressive MSE (Lower is Better)")
-    ax1.grid(True, linestyle="--", alpha=0.7)
-    ax1.legend()
-
-    # Plot 2: NFE vs Inference Time
-    for method, data in results.items():
-        if len(data["nfe"]) > 0:
-            ax2.plot(
-                data["nfe"],
-                data["time"],
-                label=method,
-                **styles[method],
-                linestyle="-",
-                linewidth=2,
+            # --- Flow Matching (Euler) ---
+            mse_euler = evaluate_ar_rollout(
+                fm_model, x_cond, x_target, nfe_steps=nfe_int, solver_method="euler"
             )
+            # Store the integer nfe_int
+            results["Euler"]["nfe"].append(nfe_int)
+            results["Euler"]["mse"].append(mse_euler)
 
-    ax2.set_title("Inference Speed vs Compute")
-    ax2.set_xlabel("Number of Function Evaluations (NFE)")
-    ax2.set_ylabel("Time for 10-Step Batch (Seconds) (Lower is Better)")
-    ax2.grid(True, linestyle="--", alpha=0.7)
-    ax2.legend()
+            # --- Flow Matching (RK4) ---
+            # RK4 uses 4 evaluations per step
+            rk4_steps = max(1, nfe_int // 4)
+            actual_rk4_nfe = rk4_steps * 4
 
-    plt.tight_layout()
+            mse_rk4 = evaluate_ar_rollout(
+                fm_model, x_cond, x_target, nfe_steps=rk4_steps, solver_method="rk4"
+            )
+            results["RK4"]["nfe"].append(actual_rk4_nfe)
+            results["RK4"]["mse"].append(mse_rk4)
+
+            # --- LIVE PLOTTING UPDATE ---
+            ax.clear()
+
+            # Plot: NFE vs MSE
+            for method, data in results.items():
+                if len(data["nfe"]) > 0:
+                    ax.plot(
+                        data["nfe"],
+                        data["mse"],
+                        label=method,
+                        **styles[method],
+                        linestyle="-",
+                        linewidth=2,
+                    )
+
+            ax.set_title(f"{ar_steps}-Step AR MSE vs. NFE")
+            ax.set_xlabel("Number of Function Evaluations (NFE)")
+            ax.set_ylabel("Autoregressive MSE (Lower is Better)")
+            # ax.set_yscale("log")
+            ax.grid(True, which="both", linestyle="--", alpha=0.7)
+
+            # Position legend on the middle right (outside the plot)
+            ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
+
+            # --- JUPYTER NOTEBOOK DISPLAY LOGIC ---
+            clear_output(wait=True)  # Clears the previous output in the cell
+            display(fig)  # Draws the updated figure
+
+    # Save the final figure and close it to prevent a duplicate from rendering
     plt.savefig("benchmark_results.png", dpi=300)
-    plt.show()
-
-
-if __name__ == "__main__":
-    # Uncomment to run:
-    # run_benchmark()
-    pass
+    plt.close(fig)
