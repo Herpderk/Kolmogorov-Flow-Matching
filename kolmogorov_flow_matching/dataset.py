@@ -7,9 +7,6 @@ from torch.utils.data import Dataset
 def compute_hdf5_stats(
     h5_file_path: str, dataset_key: str = "u", chunk_size: int = 100
 ):
-    """
-    Computes global mean and std of a massive HDF5 dataset lazily.
-    """
     with h5py.File(h5_file_path, "r") as f:
         data = f[dataset_key]
         num_trajectories = data.shape[0]
@@ -37,7 +34,7 @@ class TimeseriesDataset(Dataset):
         self,
         h5_file_path: str,
         k_frames: int = 4,
-        target_steps: int = 1,  # NEW: How many future frames to return
+        target_steps: int = 1,
         dataset_key: str = "u",
         mean: float = None,
         std: float = None,
@@ -57,14 +54,11 @@ class TimeseriesDataset(Dataset):
             self.mean = mean
             self.std = std
 
-        # 2. Get dataset shapes
         with h5py.File(self.h5_file_path, "r") as f:
             self.shape = f[self.dataset_key].shape
 
         self.num_trajectories = self.shape[0]
         self.time_steps = self.shape[1]
-
-        # NEW: Adjust the math so we don't accidentally slice past the end of the video
         self.samples_per_traj = self.time_steps - self.k_frames - self.target_steps + 1
         self.total_samples = self.num_trajectories * self.samples_per_traj
 
@@ -86,11 +80,7 @@ class TimeseriesDataset(Dataset):
         # Slice the continuous HDF5 array
         history = self.data_handle[traj_idx, t_start:t_target_start]
         target = self.data_handle[traj_idx, t_target_start:t_target_end]
-
-        # history is [4, H, W]. This naturally acts as 4 channels when batched.
         x_cond = torch.from_numpy(history).float()
-
-        # THE FIX: Unsqueeze dim 1 to force the shape to [Target_Steps, 1, H, W]
         x_target = torch.from_numpy(target).float().unsqueeze(1)
 
         return {"condition": x_cond, "target": x_target}

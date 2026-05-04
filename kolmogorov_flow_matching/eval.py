@@ -28,7 +28,7 @@ def visualize_frames(x: torch.Tensor | np.ndarray):
     else:
         x = np.squeeze(x)
 
-    # 2. Standardize to 3D [frames, H, W] for consistent looping
+    # Standardize to 3D [frames, H, W] for consistent looping
     if x.ndim == 2:
         x = x[np.newaxis, ...]  # Add a frame dimension if it's just one image
     elif x.ndim > 3:
@@ -38,10 +38,9 @@ def visualize_frames(x: torch.Tensor | np.ndarray):
 
     num_frames = x.shape[0]
 
-    # 3. Setup the plot dynamically based on the number of frames
+    # Setup the plot dynamically based on the number of frames
     fig, axes = plt.subplots(1, num_frames, figsize=(3 * num_frames, 3))
 
-    # Matplotlib returns a single Axes object if num_frames == 1, so we wrap it in a list
     if num_frames == 1:
         axes = [axes]
 
@@ -49,16 +48,12 @@ def visualize_frames(x: torch.Tensor | np.ndarray):
     vmin = x.min()
     vmax = x.max()
 
-    # 4. Plot each frame
+    # Plot each frame
     for i in range(num_frames):
         ax = axes[i]
         im = ax.imshow(x[i], cmap="RdBu_r", vmin=vmin, vmax=vmax, origin="lower")
         ax.set_title(f"Frame {i + 1}")
         ax.axis("off")
-
-    # Add a single colorbar for the whole figure
-    cbar = fig.colorbar(im, ax=axes, fraction=0.02, pad=0.04)
-    # cbar.set_label('Vorticity / Velocity')
 
     plt.suptitle(f"Kolmogorov Flow ({num_frames} frames)", y=1.05, fontsize=14)
     plt.show()
@@ -135,15 +130,12 @@ def benchmark_integration_methods(
             if nfe_int == 0:
                 continue  # Skip 0 to avoid log scale errors
 
-            # --- Diffusion (DDIM) ---
             mse_ddim = evaluate_ar_rollout(
                 diff_model, x_cond, x_target, nfe_steps=nfe_int, solver_method="ddim"
             )
-            # Store the integer nfe_int, not nfe_raw
             results["DDIM"]["nfe"].append(nfe_int)
             results["DDIM"]["mse"].append(mse_ddim)
 
-            # --- Flow Matching (Euler) ---
             mse_euler = evaluate_ar_rollout(
                 fm_model, x_cond, x_target, nfe_steps=nfe_int, solver_method="euler"
             )
@@ -151,7 +143,6 @@ def benchmark_integration_methods(
             results["Euler"]["nfe"].append(nfe_int)
             results["Euler"]["mse"].append(mse_euler)
 
-            # --- Flow Matching (RK4) ---
             # RK4 uses 4 evaluations per step
             rk4_steps = max(1, nfe_int // 4)
             actual_rk4_nfe = rk4_steps * 4
@@ -186,10 +177,8 @@ def benchmark_integration_methods(
             # Position legend on the middle right (outside the plot)
             ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
 
-            # --- JUPYTER NOTEBOOK DISPLAY LOGIC ---
-            clear_output(wait=True)  # Clears the previous output in the cell
-            display(fig)  # Draws the updated figure
+            clear_output(wait=True)
+            display(fig)
 
-    # Save the final figure and close it to prevent a duplicate from rendering
     plt.savefig("benchmark_results.png", dpi=300)
     plt.close(fig)

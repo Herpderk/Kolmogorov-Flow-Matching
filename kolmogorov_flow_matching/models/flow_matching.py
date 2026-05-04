@@ -16,7 +16,6 @@ class ConditionalFlowMatching(ConditionalGenerativeFramework):
         std: float = 1.0,
         normalize_inputs: bool = True,
     ):
-        # Passes the backbone and stats to ConditionalGenerativeFramework
         super().__init__(backbone, mean, std, normalize_inputs)
 
     def get_training_loss(
@@ -37,16 +36,14 @@ class ConditionalFlowMatching(ConditionalGenerativeFramework):
         z_s = (1.0 - s_view) * z_0 + s_view * x_target
         target_velocity = x_target - z_0
 
-        # Inject small noise into the condition so the model learns to correct drifting states
+        # Inject small noise into the condition to correct drifting states
         if self.training:
-            noise_scale = 0.02  # Tune between 0.01 and 0.05
+            noise_scale = 0.02
             x_cond_input = x_cond + torch.randn_like(x_cond) * noise_scale
         else:
             x_cond_input = x_cond
 
-        # Use the noisy condition, but keep the pristine z_s and s
         predicted_velocity = self.backbone(s, z_s, x_cond_input)
-
         return F.mse_loss(predicted_velocity, target_velocity)
 
     @torch.inference_mode()
@@ -66,7 +63,6 @@ class ConditionalFlowMatching(ConditionalGenerativeFramework):
         self.backbone.eval()
 
         def ode_func(s_scalar: torch.Tensor, z_current: torch.Tensor) -> torch.Tensor:
-            # Safely creates a 1D tensor of length B filled with the scalar time value
             s_tensor = torch.full((B,), s_scalar.item(), device=device)
             return self.backbone(s_tensor, z_current, x_cond)
 

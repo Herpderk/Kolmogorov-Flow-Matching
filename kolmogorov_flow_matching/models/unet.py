@@ -9,10 +9,6 @@ from kolmogorov_flow_matching.models.base import ConditionalBackbone
 
 
 class ConvBlock(nn.Module):
-    """
-    Modified ConvBlock with circular padding for periodic Kolmogorov flow boundaries.
-    """
-
     def __init__(
         self,
         in_channels: int,
@@ -31,8 +27,8 @@ class ConvBlock(nn.Module):
                     out_channels=out_channels,
                     kernel_size=3,
                     stride=1,
-                    padding=1,  # explicit padding of 1
-                    padding_mode="circular",  # CRITICAL: Periodic boundary conditions
+                    padding=1,
+                    padding_mode="circular",
                 )
             )
             if batchnorm:
@@ -48,12 +44,6 @@ class ConvBlock(nn.Module):
 
 
 class UpBlock(nn.Module):
-    """
-    a module in the expanding path of the U-Net.
-    First, the input to the block is upconved and concatenated with the skip connection.
-    Then, a series of conv, batchnorm, and activation layers are applied.
-    """
-
     def __init__(
         self,
         in_channels: int,
@@ -98,10 +88,6 @@ class UpBlock(nn.Module):
 
 
 class FeedForward(nn.Module):
-    """
-    A simple feedforward neural network to decode the embedded diffusion step in each stage.
-    """
-
     def __init__(
         self,
         in_features: int,
@@ -131,13 +117,8 @@ class FeedForward(nn.Module):
 
     def forward(
         self,
-        x: torch.FloatTensor,  # (batch_size, in_features)
-    ) -> torch.FloatTensor:  # (batch_size, out_features, 1, 1)
-        """
-        The output is going to be added to data of shape (B, C, H, W)
-        where C = out_features,
-        So it has to be broadcastable to the same shape.
-        """
+        x: torch.FloatTensor,
+    ) -> torch.FloatTensor:
         return self.layers(x)[..., None, None]
 
 
@@ -151,7 +132,6 @@ class SinusoidalPositionEmbedding(nn.Module):
         self.dim = dim
 
     def forward(self, time: torch.Tensor) -> torch.Tensor:
-        # time can be shape (batch_size,) containing floats like 0.45 or ints like 500
         half_dim = self.dim // 2
         embeddings = math.log(10000) / (half_dim - 1)
         embeddings = torch.exp(torch.arange(half_dim, device=time.device) * -embeddings)
@@ -161,10 +141,6 @@ class SinusoidalPositionEmbedding(nn.Module):
 
 
 class ConditionalUnetBackbone(ConditionalBackbone):
-    """
-    A purely functional U-Net that inherits from ConditionalBackbone.
-    """
-
     def __init__(
         self,
         data_shape: Sequence[int] = [1, 160, 160],
@@ -175,11 +151,8 @@ class ConditionalUnetBackbone(ConditionalBackbone):
         activation_name: str = "SiLU",
         batchnorm: bool = False,
     ):
-
-        # 1. Initialize the Base Class (handles self.data_shape and nn.Module setup)
         super().__init__(data_shape=data_shape)
 
-        # ================== U-Net Setup ==================
         n_layers = len(channels)
         self.n_layers = n_layers
         self.blocks = nn.ModuleDict()
@@ -242,7 +215,6 @@ class ConditionalUnetBackbone(ConditionalBackbone):
             padding=0,
         )
 
-    # 2. Implement the required abstract method
     def forward(
         self, time: torch.FloatTensor, x: torch.FloatTensor, x_cond: torch.FloatTensor
     ) -> torch.FloatTensor:

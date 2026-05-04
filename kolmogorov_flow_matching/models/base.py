@@ -16,7 +16,6 @@ class ConditionalBackbone(nn.Module, ABC):
 
     def __init__(self, data_shape: Sequence[int]):
         super().__init__()
-        # Required by the Framework's sample() method to generate initial noise
         self.data_shape = data_shape
 
     @abstractmethod
@@ -81,11 +80,11 @@ class ConditionalGenerativeFramework(nn.Module, ABC):
 
         with torch.no_grad():
             for step in range(num_steps):
-                # 1. Generate the next frame, passing down solver configs (NFE, method, etc.)
+                # Generate the next frame, passing down solver configs (NFE, method, etc.)
                 next_frame = self.sample(history, **kwargs)
                 predictions.append(next_frame)
 
-                # 2. Slide the window
+                # Slide the window
                 history = torch.cat([history[:, 1:], next_frame], dim=1)
 
         return (

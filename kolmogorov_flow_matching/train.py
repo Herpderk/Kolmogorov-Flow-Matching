@@ -8,7 +8,7 @@ from torchvision.transforms import ToPILImage
 from tqdm import tqdm
 
 from kolmogorov_flow_matching.dataset import (
-    TimeseriesDataset,  # Updated class name based on your prompt
+    TimeseriesDataset,
 )
 from kolmogorov_flow_matching.models.base import ConditionalGenerativeFramework
 
@@ -59,7 +59,6 @@ def train_conditional_generative_model(
         # position=0 ensures the training bar stays at the top
         with tqdm(train_loader, desc=f"Epoch {epoch + 1}", position=0) as progress_bar:
             for batch_idx, batch in enumerate(progress_bar):
-                # --- TRAIN STEP ---
                 x_cond = batch["condition"].to(device)
                 x_target = batch["target"].to(device)
                 if x_target.ndim == 5:
@@ -77,7 +76,6 @@ def train_conditional_generative_model(
                 current_loss = loss.item()
                 progress_bar.set_postfix({"Loss": f"{current_loss:.5f}"})
 
-                # --- LOG TRAINING ---
                 if global_step % log_interval == 0:
                     samples_seen = global_step * batch_size  # Calculate samples
                     if use_wandb and wandb.run is not None:
@@ -91,8 +89,6 @@ def train_conditional_generative_model(
                             step=global_step,
                         )
 
-                # --- VALIDATE ---
-                # Added 'global_step == 1' to catch bugs early and show baseline
                 if global_step == 1 or global_step % val_interval == 0:
                     validate(
                         model,
@@ -115,7 +111,6 @@ def validate(model, valid_loader, device, global_step, use_wandb, max_batches=No
     total_val_steps = max_batches if max_batches is not None else len(valid_loader)
 
     with torch.no_grad():
-        # position=1 puts this bar below the training bar
         val_bar = tqdm(
             enumerate(valid_loader),
             total=total_val_steps,
@@ -158,13 +153,11 @@ def validate(model, valid_loader, device, global_step, use_wandb, max_batches=No
     avg_v = v_loss_total / batches_processed
     avg_ar = ar_loss_total / batches_processed
 
-    # --- Visualization ---
     x_gen_eval = model.sample(viz_data["condition"])
     target_f = viz_data["target"][0, 0]
     gen_f = x_gen_eval[0]
     residual = gen_f - target_f
 
-    # Bias the residual: Gray (0.5) is perfect. White is over-predicted, Black is under-predicted.
     residual_vis = (residual + 1.0) / 2.0
     comparison_strip = torch.cat([target_f, gen_f, residual_vis], dim=2)
 

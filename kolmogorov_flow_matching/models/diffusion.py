@@ -67,9 +67,8 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
         x = torch.randn((B, *self.backbone.data_shape), device=device)
         trajectory = [x] if return_trajectory else None
 
-        # 1. Create the sub-sampled DDIM time steps
+        # Create the sub-sampled DDIM time steps
         step_ratio = self.T // num_inference_steps
-        # e.g., for T=1000, steps=50: [980, 960, ..., 20, 0]
         timesteps = (
             torch.flip(
                 (torch.arange(0, num_inference_steps) * step_ratio).round(), dims=[0]
@@ -77,44 +76,40 @@ class ConditionalDiffusion(ConditionalGenerativeFramework):
             .to(device)
             .long()
         )
-        # The previous timestep to jump to (appending -1 to represent the final pure x_0 state)
         timesteps_prev = torch.cat([timesteps[1:], torch.tensor([-1], device=device)])
 
-        # 2. Iterate over the shortened sequence
+        # Iterate over the shortened sequence
         for t_step, t_prev in zip(timesteps, timesteps_prev):
-            # Create a batch-sized tensor for the neural net
             t_tensor = torch.full(
                 (B,), t_step.item(), device=device, dtype=torch.float32
             )
             predicted_noise = self.backbone(t_tensor, x, x_cond)
 
-            # Grab the alpha_bar (cumulative product) for current and previous step
+            # Grab the alpha_bar for current and previous step
             alpha_bar_t = self.alpha_bar[t_step]
-            # If we are at the final step (t_prev == -1), alpha_bar is defined as 1.0
             alpha_bar_prev = (
                 self.alpha_bar[t_prev]
                 if t_prev >= 0
                 else torch.tensor(1.0, device=device)
             )
 
-            # 3. Implement the DDIM Equation
-            # Step A: Predict the clean image (x_0)
+            # DDIM Equation
+            # Predict the clean image
             pred_x0 = (
                 x - torch.sqrt(1.0 - alpha_bar_t) * predicted_noise
             ) / torch.sqrt(alpha_bar_t)
 
-            # Step B: Calculate standard deviation of noise (sigma_t)
-            # When eta=0 (default DDIM), sigma_t is 0, making the generation deterministic
+            # Calculate standard deviation of noise (sigma_t)
             sigma_t = eta * torch.sqrt(
                 (1.0 - alpha_bar_prev)
                 / (1.0 - alpha_bar_t)
                 * (1.0 - alpha_bar_t / alpha_bar_prev)
             )
 
-            # Step C: Calculate the direction pointing to x_t
+            # Calculate the direction pointing to x_t
             dir_xt = torch.sqrt(1.0 - alpha_bar_prev - sigma_t**2) * predicted_noise
 
-            # Step D: Jump to the previous timestep
+            # Jump to the previous timestep
             noise = torch.randn_like(x) if t_prev >= 0 else 0.0
             x = torch.sqrt(alpha_bar_prev) * pred_x0 + dir_xt + sigma_t * noise
 
